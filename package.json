@@ -13,6 +13,7 @@
     "skills/",
     "scripts/",
     "worker/",
+    "wrangler.jsonc",
     "localmcp.example.json",
     "README.md",
     "LICENSE"
@@ -30,18 +31,19 @@
     "prepublishOnly": "npm run check && npm test && npm run build",
     "start:quick": "node dist/launch.js",
     "worker:setup": "node scripts/worker-setup.mjs",
-    "worker:dev": "wrangler dev --config worker/wrangler.jsonc",
-    "worker:deploy": "wrangler deploy --config worker/wrangler.jsonc",
-    "worker:secrets": "wrangler secret bulk ~/.localmcp/worker-secrets.json --config worker/wrangler.jsonc"
+    "worker:dev": "wrangler dev --config wrangler.jsonc",
+    "deploy": "npm run worker:deploy",
+    "worker:deploy": "wrangler deploy --config wrangler.jsonc",
+    "worker:secrets": "wrangler secret bulk ~/.localmcp/worker-secrets.json --config wrangler.jsonc"
   },
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/daodao97/locamcp.git"
+    "url": "git+ssh://git@github.com/daodao97/localmcp.git"
   },
   "bugs": {
-    "url": "https://github.com/daodao97/locamcp/issues"
+    "url": "https://github.com/daodao97/localmcp/issues"
   },
-  "homepage": "https://github.com/daodao97/locamcp#readme",
+  "homepage": "https://github.com/daodao97/localmcp#readme",
   "keywords": [
     "mcp",
     "model-context-protocol",
