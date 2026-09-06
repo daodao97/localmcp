@@ -100,9 +100,9 @@ npm install -g @daodao97/localmcp
 localmcp
 ```
 
-**当前开源版本需要注意：**现有 Worker 实现使用单组 `MCP_TOKEN_HASH` / `AGENT_TOKEN_HASH`，还没有实现公共 Worker 所需的多用户注册、凭证签发和隔离。因此在公共 Worker 的账号/凭证 provisioning 完成前，`localmcp start` 仍需要 `.localmcp/worker.json`。不要把一个单用户 Worker 的密钥共享给多个不受信任用户。
+首次运行时，LocalMCP 会自动向项目 Worker 注册一个独立设备，生成该设备专属的 `agentToken`、`mcpToken` 和 `deviceId`，并保存到 `~/.localmcp/worker.json`。每个设备会被路由到独立 Durable Object，不与其他用户共享 Agent 连接或 MCP 凭证。
 
-也就是说，项目结构已经把“官方 Worker”和“自托管 Worker”分离，但当前可安全直接使用的方式仍然是下面的自托管 Worker。公共 Worker 能力完成后，普通用户的最终体验会保持为上面的四条命令。
+默认公共 Worker：`https://localmcp-relay.daodao973597.workers.dev`。如果你删除 `~/.localmcp/worker.json`，下次启动会重新注册一个新设备。完整 MCP URL 仍是访问凭证，请勿公开分享。
 
 ### 方式二：部署自己的 Worker
 
@@ -127,11 +127,11 @@ npm run worker:setup
 npm run worker:deploy
 ```
 
-首次 `worker:setup` 会生成：
+首次 `worker:setup` 会生成到用户级目录：
 
 ```text
-.localmcp/worker.json
-.localmcp/worker-secrets.json
+~/.localmcp/worker.json
+~/.localmcp/worker-secrets.json
 ```
 
 其中 `worker.json` 保存本机使用的原始凭证；`worker-secrets.json` 只包含需要上传到 Worker 的 SHA-256 摘要。

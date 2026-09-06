@@ -29,14 +29,17 @@ test('Worker + Durable Object + local agent: authenticated MCP, chunking and rec
   let ready=false;
   for(let i=0;i<200;i++){try{if((await fetch(origin+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,100));}
   assert.ok(ready,logs);
-  const url=`${origin}/mcp/${mcpToken}`;
-  const post=()=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-  assert.equal((await post()).status,503);
+  const legacyUrl=`${origin}/mcp/${mcpToken}`;
+  assert.equal((await fetch(legacyUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,503);
   assert.equal((await fetch(origin+'/mcp/bad',{method:'POST'})).status,404);
-  assert.equal((await fetch(url,{headers:{Origin:'https://evil.example'}})).status,403);
+  assert.equal((await fetch(legacyUrl,{headers:{Origin:'https://evil.example'}})).status,403);
   assert.equal((await fetch(origin+'/agent',{headers:{Authorization:`Bearer ${mcpToken}`}})).status,404);
+  const registration=await fetch(origin+'/register',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});assert.equal(registration.status,201);
+  const registered:any=await registration.json();assert.match(registered.deviceId,/^[0-9a-f-]{36}$/);assert.equal(registered.agentToken.length,64);assert.equal(registered.mcpToken.length,64);
+  const url=registered.mcpUrl;const post=()=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});assert.equal((await post()).status,503);
+  assert.equal((await fetch(`${origin}/mcp/${registered.deviceId}/${mcpToken}`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,404);
   await mkdir(join(root,'.localmcp'));
-  await writeFile(join(root,'.localmcp/worker.json'),JSON.stringify({workerUrl:origin,agentToken,mcpToken}));
+  await writeFile(join(root,'.localmcp/worker.json'),JSON.stringify({workerUrl:origin,agentToken:registered.agentToken,mcpToken:registered.mcpToken,deviceId:registered.deviceId}));
   async function startAgent(){
     const agent=spawn(process.execPath,[resolve('dist/agent.js')],{cwd:root,env:{...process.env,HOME:root,LOCALMCP_ROOT:root,LOCALMCP_AGENT_PORT:String(port+1),LOCALMCP_SHELL:'0'},stdio:['ignore','pipe','pipe']});children.push(agent);
     let output='';agent.stdout?.on('data',c=>{output+=c;});agent.stderr?.on('data',c=>{output+=c;});
@@ -51,7 +54,7 @@ test('Worker + Durable Object + local agent: authenticated MCP, chunking and rec
   const result:any=await client.callTool({name:'read_file',arguments:{path:'relay.txt'}});
   assert.equal(JSON.parse(result.content[0].text).content,content);
   // A second agent must not take over the owner connection.
-  const duplicate=new WebSocket(origin.replace('http:','ws:')+'/agent',{headers:{Authorization:`Bearer ${agentToken}`}});
+  const duplicate=new WebSocket(origin.replace('http:','ws:')+`/agent/${registered.deviceId}`,{headers:{Authorization:`Bearer ${registered.agentToken}`}});
   const status=await new Promise<number>((resolve,reject)=>{duplicate.on('unexpected-response',(_req,res)=>{res.resume();duplicate.terminate();resolve(res.statusCode!);});duplicate.on('error',()=>{});duplicate.on('open',()=>{duplicate.close();reject(new Error('Duplicate accepted'));});});
   assert.equal(status,409);
   await client.close();agent.kill('SIGTERM');await new Promise(r=>setTimeout(r,2200));

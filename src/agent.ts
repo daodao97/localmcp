@@ -8,12 +8,25 @@ import { homedir } from 'node:os';
 import WebSocket from 'ws';
 import { Assembly, frames, parseFrame, MAX_BYTES } from './relay-protocol.js';
 
-interface Settings { workerUrl: string; agentToken: string; mcpToken: string }
+interface Settings { workerUrl: string; agentToken: string; mcpToken: string; deviceId?: string }
+const DEFAULT_PUBLIC_WORKER_URL='https://localmcp-relay.daodao973597.workers.dev';
 const stateDir=resolve(homedir(),'.localmcp');
 await mkdir(stateDir,{recursive:true,mode:0o700});
 const pidFile=resolve(stateDir,'agent.pid');
 await writeFile(pidFile,String(process.pid),{mode:0o600});
-const settings: Settings = JSON.parse(await readFile(resolve(stateDir,'worker.json'),'utf8'));
+const workerFile=resolve(stateDir,'worker.json');
+let settings:Settings;
+try{settings=JSON.parse(await readFile(workerFile,'utf8'));}
+catch(error:any){
+  if(error.code!=='ENOENT')throw error;
+  const workerUrl=process.env.LOCALMCP_WORKER_URL||DEFAULT_PUBLIC_WORKER_URL;
+  const response=await fetch(new URL('/register',workerUrl),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  if(!response.ok)throw new Error(`Public Worker registration failed (${response.status}). Set LOCALMCP_WORKER_URL to a self-hosted Worker if needed.`);
+  const registered=await response.json() as Settings;
+  settings={workerUrl:registered.workerUrl,agentToken:registered.agentToken,mcpToken:registered.mcpToken,deviceId:registered.deviceId};
+  await writeFile(workerFile,JSON.stringify(settings,null,2),{mode:0o600});
+  console.error(`Registered LocalMCP device ${settings.deviceId}.`);
+}
 const origin = new URL(process.env.LOCALMCP_WORKER_URL || settings.workerUrl);
 if (origin.protocol !== 'https:' && !(origin.protocol === 'http:' && ['localhost','127.0.0.1'].includes(origin.hostname))) throw new Error('Worker URL must use HTTPS');
 if (origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new Error('Worker URL must be an origin');
@@ -38,9 +51,10 @@ for (let i=0;i<100 && !closing;i++) {
 }
 if (!ready) {stop(1);} else {
   let attempt=0, busy=false;
-  const mcpUrl=new URL(`/mcp/${settings.mcpToken}`,origin).href;
-  await writeFile(resolve(stateDir,'connection.json'),JSON.stringify({url:mcpUrl,authentication:'none',transport:'worker-websocket',root:process.env.LOCALMCP_ROOT||process.cwd()},null,2),{mode:0o600});
-  const wsUrl=new URL('/agent',origin);wsUrl.protocol=origin.protocol==='https:'?'wss:':'ws:';
+  const mcpPath=settings.deviceId?`/mcp/${settings.deviceId}/${settings.mcpToken}`:`/mcp/${settings.mcpToken}`;
+  const mcpUrl=new URL(mcpPath,origin).href;
+  await writeFile(resolve(stateDir,'connection.json'),JSON.stringify({url:mcpUrl,authentication:'none',transport:'worker-websocket',deviceId:settings.deviceId,root:process.env.LOCALMCP_ROOT||process.cwd()},null,2),{mode:0o600});
+  const wsUrl=new URL(settings.deviceId?`/agent/${settings.deviceId}`:'/agent',origin);wsUrl.protocol=origin.protocol==='https:'?'wss:':'ws:';
   function connect() {
     if (closing) return;
     const ws=new WebSocket(wsUrl,{headers:{Authorization:`Bearer ${settings.agentToken}`},handshakeTimeout:15000,maxPayload:160000});socket=ws;
