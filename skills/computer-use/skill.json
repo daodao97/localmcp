@@ -1,0 +1,5 @@
+{
+  "name": "computer-use",
+  "description": "Operate local desktop applications",
+  "mcp": { "name": "computer", "command": "cua-driver", "args": ["mcp"] }
+}

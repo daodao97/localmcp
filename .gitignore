@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.localmcp/
+*.log
+.wrangler/
+.dev.vars*
+localmcp.json

@@ -1,0 +1,22 @@
+{
+  "workspaces": {
+    "localmcp": "."
+  },
+  "defaultWorkspace": "localmcp",
+  "features": {
+    "files": true,
+    "shell": false,
+    "processes": true
+  },
+  "skills": {
+    "dir": "skills",
+    "enabled": ["computer-use"]
+  },
+  "mcpServers": {
+    "computer": {
+      "enabled": true,
+      "command": "cua-driver",
+      "args": ["mcp"]
+    }
+  }
+}

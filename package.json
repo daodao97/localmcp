@@ -1,0 +1,43 @@
+{
+  "name": "localmcp",
+  "version": "0.3.0",
+  "description": "Local development and computer-use MCP bridge for ChatGPT",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/agent.js",
+    "stdio": "node dist/index.js stdio",
+    "http": "node dist/index.js http",
+    "dev": "tsx src/index.ts",
+    "test": "tsx --test test/*.test.ts",
+    "check": "tsc --noEmit && tsc -p worker/tsconfig.json",
+    "start:quick": "node dist/launch.js",
+    "worker:setup": "node scripts/worker-setup.mjs",
+    "worker:dev": "wrangler dev --config worker/wrangler.jsonc",
+    "worker:deploy": "wrangler deploy --config worker/wrangler.jsonc",
+    "worker:secrets": "wrangler secret bulk .localmcp/worker-secrets.json --config worker/wrangler.jsonc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "express": "^5.2.1",
+    "ws": "^8.21.3",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260906.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.4.1",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.129.0"
+  },
+  "bin": {
+    "localmcp": "dist/index.js"
+  },
+  "private": true
+}
