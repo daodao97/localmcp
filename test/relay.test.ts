@@ -38,7 +38,7 @@ test('Worker + Durable Object + local agent: authenticated MCP, chunking and rec
   await mkdir(join(root,'.localmcp'));
   await writeFile(join(root,'.localmcp/worker.json'),JSON.stringify({workerUrl:origin,agentToken,mcpToken}));
   async function startAgent(){
-    const agent=spawn(process.execPath,[resolve('dist/agent.js')],{cwd:root,env:{...process.env,LOCALMCP_ROOT:root,LOCALMCP_AGENT_PORT:String(port+1),LOCALMCP_SHELL:'0'},stdio:['ignore','pipe','pipe']});children.push(agent);
+    const agent=spawn(process.execPath,[resolve('dist/agent.js')],{cwd:root,env:{...process.env,HOME:root,LOCALMCP_ROOT:root,LOCALMCP_AGENT_PORT:String(port+1),LOCALMCP_SHELL:'0'},stdio:['ignore','pipe','pipe']});children.push(agent);
     let output='';agent.stdout?.on('data',c=>{output+=c;});agent.stderr?.on('data',c=>{output+=c;});
     for(let i=0;i<100;i++){if(output.includes('Worker connected.'))return agent;await new Promise(r=>setTimeout(r,100));}assert.fail(output);
   }

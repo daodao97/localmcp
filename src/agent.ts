@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile, writeFile, unlink } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,7 @@ import { Assembly, frames, parseFrame, MAX_BYTES } from './relay-protocol.js';
 
 interface Settings { workerUrl: string; agentToken: string; mcpToken: string }
 const stateDir=resolve(homedir(),'.localmcp');
+await mkdir(stateDir,{recursive:true,mode:0o700});
 const pidFile=resolve(stateDir,'agent.pid');
 await writeFile(pidFile,String(process.pid),{mode:0o600});
 const settings: Settings = JSON.parse(await readFile(resolve(stateDir,'worker.json'),'utf8'));
