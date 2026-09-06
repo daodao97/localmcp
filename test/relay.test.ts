@@ -67,7 +67,7 @@ test('Worker + Durable Object + local agent: authenticated MCP, chunking and rec
   assert.match(await cli('status'),new RegExp('PID: '+pid));
   const client=new Client({name:'worker-test',version:'1'});
   await client.connect(new StreamableHTTPClientTransport(new URL(url)));
-  const tools=await client.listTools();assert.equal(tools.tools.length,17);
+  const tools=await client.listTools();assert.equal(tools.tools.length,20);
   const content='中文😀'.repeat(25000);
   assert.equal((await client.callTool({name:'write_file',arguments:{path:'relay.txt',content}})).isError,undefined);
   const result:any=await client.callTool({name:'read_file',arguments:{path:'relay.txt'}});
@@ -80,24 +80,37 @@ test('Worker + Durable Object + local agent: authenticated MCP, chunking and rec
   const originalConfig=await readFile(configPath,'utf8');
   await writeFile(configPath,'{invalid');
   await assert.rejects(cli('reload'), /Invalid JSON/);
-  assert.equal((await client.listTools()).tools.length,17);
+  assert.equal((await client.listTools()).tools.length,20);
   const changedConfig=JSON.parse(originalConfig);
   changedConfig.workspaces={reloaded:root};changedConfig.defaultWorkspace='reloaded';
+  changedConfig.mcpServers={fixture:{command:process.execPath,args:[resolve('test/fixtures/mcp-server.mjs')]}};
   await writeFile(configPath,JSON.stringify(changedConfig));
-  const reloaded=await cli('reload');
-  assert.match(reloaded,/configuration reloaded/);
+  let hot=false;
+  for(let i=0;i<100;i++){
+    const info:any=await client.callTool({name:'list_workspaces',arguments:{}});
+    if(JSON.parse(info.content[0].text).defaultWorkspace==='reloaded'){hot=true;break;}
+    await new Promise(r=>setTimeout(r,100));
+  }
+  assert.ok(hot,'configuration should update without a reload command');
+  const reloaded=await cli('status');
   assert.ok(reloaded.includes(url));
   assert.match(reloaded,new RegExp('PID: '+pid));
   const workspaces:any=await client.callTool({name:'list_workspaces',arguments:{}});
   assert.ok(workspaces.content[0].text.includes('reloaded'));
-  assert.equal((await client.listTools()).tools.length,17);
+  assert.deepEqual(await client.listTools(),tools);
+  const external:any=await client.callTool({name:'list_mcp_tools',arguments:{server:'fixture'}});
+  assert.equal(JSON.parse(external.content[0].text).tools[0].name,'echo');
+  const echoed:any=await client.callTool({name:'call_mcp_tool',arguments:{server:'fixture',tool:'echo',arguments:{text:'through relay'}}});
+  assert.equal(echoed.isError,false);
+  assert.equal(echoed.content[1].type,'image');
+  assert.equal((await client.listTools()).tools.length,20);
   await client.close();
   assert.match(await cli('stop'),/Status: stopped/);
   assert.match(await cli('stop'),/Status: stopped/);
   assert.equal((await post()).status,503);
   assert.match(await cli(),/Status: running/);
   const second=new Client({name:'reconnect-test',version:'1'});await second.connect(new StreamableHTTPClientTransport(new URL(url)));
-  assert.equal((await second.listTools()).tools.length,17);await second.close();
+  assert.equal((await second.listTools()).tools.length,20);await second.close();
   await cli('stop');
   await writeFile(join(root,'.localmcp/worker.json'),'{invalid');
   await assert.rejects(cli(), /startup failed/);

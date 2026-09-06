@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { config } from './config.js';
+import { config, configFilePath } from './config.js';
+import { watchConfig } from './config-watch.js';
 import { createServer } from './server.js';
 import { McpLoader } from './mcp/loader.js';
 import { loadSkills } from './skills/loader.js';
@@ -42,9 +43,26 @@ async function main() {
   await mcp.start();
   const skills = await loadSkills(cfg.skillsDir,cfg.enabledSkills);
   const processes = new ProcessManager();
+  let runtime={config:cfg,mcp,skills};
+  const retired=new Set<Promise<void>>();
+  const closeWatcher=watchConfig(configFilePath(),async content=>{
+    const nextConfig=await config({content,path:configFilePath()});
+    if(JSON.stringify(nextConfig)===JSON.stringify(runtime.config))return;
+    const nextSkills=await loadSkills(nextConfig.skillsDir,nextConfig.enabledSkills);
+    const changedMcp=JSON.stringify(nextConfig.mcpServers)!==JSON.stringify(runtime.config.mcpServers);
+    const nextMcp=changedMcp?new McpLoader(nextConfig.mcpServers):runtime.mcp;
+    if(changedMcp)await nextMcp.start();
+    const previous=runtime;
+    runtime={config:nextConfig,mcp:nextMcp,skills:nextSkills};
+    if(changedMcp){
+      const closing=previous.mcp.close().finally(()=>retired.delete(closing));
+      retired.add(closing);
+    }
+    console.error('LocalMCP configuration hot-reloaded.');
+  },error=>console.error('LocalMCP config hot-reload rejected; keeping current configuration:',error instanceof Error?error.message:String(error)));
   const shutdown: Array<() => Promise<unknown>> = [];
   if (mode === 'stdio') {
-    const server = await createServer(cfg, mcp, skills, processes);
+    const server = await createServer(cfg, mcp, skills, processes,()=>runtime);
     await server.connect(new StdioServerTransport());
     shutdown.push(() => server.close());
   } else {
@@ -71,7 +89,7 @@ async function main() {
       let server: Awaited<ReturnType<typeof createServer>> | undefined;
       let transport: StreamableHTTPServerTransport | undefined;
       try {
-        server = await createServer(cfg, mcp, skills, processes);
+        server = await createServer(cfg, mcp, skills, processes,()=>runtime);
         transport = new StreamableHTTPServerTransport({sessionIdGenerator: undefined, enableJsonResponse: true});
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
@@ -84,7 +102,7 @@ async function main() {
     listener.on('error', error => {console.error(error.message); process.exit(1);});
     shutdown.push(() => new Promise<void>(r => listener.close(() => r())));
   }
-  const stop = async () => {for (const fn of shutdown) await fn(); await processes.close(); await mcp.close(); process.exit(0);};
+  const stop = async () => {await closeWatcher();for (const fn of shutdown) await fn(); await processes.close(); await runtime.mcp.close(); await Promise.allSettled([...retired]); process.exit(0);};
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
 }
 main().catch(error => {console.error(error.message); process.exit(1);});

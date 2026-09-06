@@ -38,7 +38,7 @@ test('real SDK stdio initialization and create/read/edit/list round trip', async
   const transport = new StdioClientTransport({command:process.execPath,args:[resolve('dist/index.js'),'stdio'],env:{LOCALMCP_ROOT:root,LOCALMCP_CONFIG:'/nonexistent/localmcp-test.json'},stderr:'pipe'});
   await client.connect(transport); t.after(() => client.close());
   const tools = await client.listTools();
-  assert.equal(tools.tools.length,23);
+  assert.equal(tools.tools.length,26);
   assert.ok(tools.tools.some(t => t.name === 'run_command'));
   const call = (name: string,args: any) => client.callTool({name,arguments:args});
   assert.equal((await call('write_file',{path:'hello.txt',content:'hello world'})).isError,undefined);
@@ -65,7 +65,7 @@ test('HTTP URL credential, origin rejection and SDK round trip', async t => {
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp/${token}`)));
   t.after(() => client.close());
   const tools = await client.listTools();
-  assert.equal(tools.tools.length,17);
+  assert.equal(tools.tools.length,20);
   assert.ok(!tools.tools.some(t => t.name === 'run_command'));
   assert.equal((await client.callTool({name:'run_command',arguments:{command:'pwd'}})).isError,true);
   const result = await client.callTool({name:'write_file',arguments:{path:'http.txt',content:'over HTTP'}});

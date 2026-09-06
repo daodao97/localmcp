@@ -41,8 +41,8 @@ When a task requires an MCP server or a LocalMCP skill that is not currently ava
    ```
 
 4. If the server needs environment variables, add only the required non-secret configuration. Never copy credentials from unrelated files or expose secrets in responses.
-5. Reload or restart LocalMCP after changing MCP configuration when lifecycle commands are available.
-6. Verify that the MCP tools are actually exposed after reload. Do not claim installation succeeded merely because the config file was edited.
+5. Changes to the active configuration file are hot-reloaded automatically after settling (normally about one second, plus MCP startup time). Discover the updated services after saving. If validation or startup fails, the old configuration remains active; inspect the log. Do not synchronously call `localmcp reload` or `stop` through its own `run_command`.
+6. Verify the server appears in `list_mcp_servers`, then call `list_mcp_tools` with its `server` name. Read the returned tool descriptions, input schemas, and annotations before using `call_mcp_tool` with `{server, tool, arguments}`. Use original tool names, not namespaced top-level tools. Do not claim installation succeeded merely because the config file was edited.
 7. If startup fails, inspect the executable path, arguments, environment, and LocalMCP status/output and fix the concrete failure when possible.
 
 ### Skills
@@ -51,7 +51,7 @@ When a task requires an MCP server or a LocalMCP skill that is not currently ava
 2. Install a skill into the active skills directory, not merely into a repository copy that the running LocalMCP instance does not use. A skill should normally live in its own directory and contain `SKILL.md`.
 3. If the skill distribution also contains metadata such as `skill.json`, preserve it when installing the skill.
 4. Add the skill name to `skills.enabled` in the active LocalMCP config when an allow-list is present. Preserve all already-enabled skills.
-5. Reload or restart LocalMCP when necessary, then verify the skill appears in `list_skills` and can be read with `read_skill`.
+5. Changes to `skills` in the active configuration trigger hot reload. Verify the skill appears in `list_skills` and can be read with `read_skill`. Editing only skill files does not trigger hot reload; use an external terminal to run `localmcp reload` in that case.
 6. If a skill declares an MCP dependency in metadata, check whether the current LocalMCP implementation automatically loads that dependency. If it does not, install and configure the MCP server separately rather than assuming the metadata is active.
 
 ### Safety and change discipline

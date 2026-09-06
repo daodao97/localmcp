@@ -26,8 +26,9 @@ async function readConfig():Promise<{value:FileConfig;base:string;path?:string}>
  try{return {value:parseConfig(JSON.parse(await readFile(path,'utf8')),path),base:dirname(path),path};}
  catch(e:any){if(e instanceof SyntaxError)throw new Error(`Invalid JSON in LocalMCP config ${path}: ${e.message}`);if(e.code!=='ENOENT')throw e;return {value:localMcpConfigSchema.parse({}),base:homedir()};}
 }
-export async function config():Promise<Config>{
- const loaded=await readConfig(),c=loaded.value;
+export function configFilePath(){return resolve(process.env.LOCALMCP_CONFIG||resolve(homedir(),'.localmcp','localmcp.json'));}
+export async function config(snapshot?:{content:string;path:string}):Promise<Config>{
+ const loaded=snapshot?{value:parseConfig(JSON.parse(snapshot.content),snapshot.path),base:dirname(snapshot.path),path:snapshot.path}:await readConfig(),c=loaded.value;
  const configured=c.workspaces&&Object.keys(c.workspaces).length?c.workspaces:{default:c.root||'.'};
  const rootOverride=process.env.LOCALMCP_ROOT;
  const expand=(path:string)=>path==='~'||path.startsWith('~/')?resolve(homedir(),path.slice(2)):resolve(loaded.base,path);
