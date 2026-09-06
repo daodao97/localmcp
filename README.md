@@ -1,159 +1,376 @@
-# localmcp
+# LocalMCP
 
-ChatGPT 网页版通过固定 Worker URL 调用本机文件、开发命令和 computer use。
+在 ChatGPT 网页版中安全地使用本机开发能力：文件操作、Shell、持久进程、Skills，以及任意可插拔 MCP Server。
 
-```text
-ChatGPT ── HTTPS MCP ──> Cloudflare Worker + Durable Object
-                                      ⇅ WebSocket
-                             本地 agent 主动连接
-                                      ↓
-                             本地 MCP / 文件 / Shell / GUI
+> **项目初衷**：LocalMCP 最初是为了在 ChatGPT 网页端直接进行本地开发，让开发过程可以利用 ChatGPT 网页端会话额度，而不必把主要工作流切换到单独按 API Token 计费的 Agent 客户端。它通过一个反向连接的 Worker 中继，把 ChatGPT 中的 MCP 调用送到你的电脑。
+
+## 工作原理
+
+```mermaid
+flowchart LR
+    U[ChatGPT 网页端] -->|HTTPS / MCP| W[Cloudflare Worker]
+    W <-->|WebSocket 反向连接| A[LocalMCP Agent]
+
+    A --> F[Files]
+    A --> S[Shell / Process]
+    A --> K[Skills]
+    A --> M[MCP Servers]
+
+    M --> C[Computer Use / cua-driver]
+    M --> X[其他 MCP]
 ```
 
-借鉴 hostc 的反向连接方式，独立实现 MCP 专用中继；不依赖 hostc 服务或 cloudflared。Worker 只转发 MCP，不执行本地开发操作，不接受任意目标 URL。本地无需公网 IP 或入站端口。相同 Worker 的 URL 在本地重连后保持不变。
+更完整的数据路径：
 
-## 首次部署
+```text
+┌──────────────────┐
+│ ChatGPT 网页端   │
+└────────┬─────────┘
+         │ HTTPS / MCP
+         ▼
+┌──────────────────────────┐
+│ Cloudflare Worker        │
+│ + Durable Object         │
+│                          │
+│ 只负责认证与请求中继     │
+└───────────┬──────────────┘
+            │ WSS
+            │ 本机主动建立连接
+            ▼
+┌──────────────────────────┐
+│ LocalMCP Agent           │
+├──────────────────────────┤
+│ Workspace / Files        │
+│ Shell / Process          │
+│ Skills                   │
+│ MCP Loader               │
+└───────────┬──────────────┘
+            │
+            ├── computer → cua-driver
+            ├── browser  → browser MCP
+            └── ...任意标准 MCP Server
+```
 
-需要 Node.js 22+、npm 和 Cloudflare 账号（Worker + SQLite Durable Objects）。
+本机主动连接 Worker，因此不需要公网 IP、不需要开放入站端口，也不需要把本机 HTTP 服务直接暴露到公网。Worker 不执行本地开发操作，只负责把 MCP 请求转发给当前连接的 LocalMCP Agent。
+
+## 安装
+
+npm 包：`@daodao97/localmcp`
 
 ```sh
+npm install -g @daodao97/localmcp
+localmcp
+```
+
+需要 Node.js 22+。LocalMCP 按全局工具使用，不需要单独创建 `my-localmcp` 目录，也不需要主动执行 `init`。首次运行 `localmcp` 或 `localmcp start` 时会自动初始化用户配置并启动 Agent。
+
+LocalMCP 的用户级配置统一位于 `~/.localmcp/`：
+
+```text
+~/.localmcp/
+├── localmcp.json
+└── skills/
+```
+
+之后可以在任意目录直接运行 `localmcp`；它等价于 `localmcp start`。工作区统一在 `~/.localmcp/localmcp.json` 中配置。无需为 LocalMCP 单独创建项目目录。
+
+常用命令：
+
+```sh
+localmcp          # 默认：自动初始化（如需要）并启动
+localmcp start    # 显式启动
+localmcp reload   # 重新加载配置并重启本地 MCP 服务
+localmcp init     # 可选：仅初始化/检查用户配置
+localmcp stdio    # 标准 MCP stdio 模式
+localmcp http     # 本地 HTTP 模式
+```
+
+## Worker 使用方式
+
+LocalMCP 的设计支持两种 Worker 使用方式：
+
+1. 使用项目提供的 Worker 服务。
+2. 自己部署 Worker，所有中继和密钥由自己管理。
+
+### 方式一：使用项目提供的 Worker
+
+这是项目希望提供给普通用户的最简单使用方式：安装 LocalMCP 后直接连接项目提供的 Worker，不需要理解 Cloudflare Worker、Durable Object 或 Wrangler。
+
+```sh
+npm install -g @daodao97/localmcp
+localmcp init
+localmcp start
+```
+
+**当前开源版本需要注意：**现有 Worker 实现使用单组 `MCP_TOKEN_HASH` / `AGENT_TOKEN_HASH`，还没有实现公共 Worker 所需的多用户注册、凭证签发和隔离。因此在公共 Worker 的账号/凭证 provisioning 完成前，`localmcp start` 仍需要 `.localmcp/worker.json`。不要把一个单用户 Worker 的密钥共享给多个不受信任用户。
+
+也就是说，项目结构已经把“官方 Worker”和“自托管 Worker”分离，但当前可安全直接使用的方式仍然是下面的自托管 Worker。公共 Worker 能力完成后，普通用户的最终体验会保持为上面的四条命令。
+
+### 方式二：部署自己的 Worker
+
+如果你希望完全控制中继、域名和访问密钥，可以把 Worker 部署到自己的 Cloudflare 账号。
+
+需要：
+
+- Cloudflare 账号
+- Workers
+- SQLite Durable Objects
+- Wrangler
+
+推荐直接从 GitHub 源码部署：
+
+```sh
+git clone git@github.com:daodao97/locamcp.git
+cd locamcp
 npm ci
-npm run build
+
 npx wrangler login
 npm run worker:setup
 npm run worker:deploy
-npm run worker:secrets
-# 使用 deploy 输出的实际 Worker 域名：
-npm run worker:setup -- https://localmcp-relay.YOUR-SUBDOMAIN.workers.dev
 ```
 
-`worker:setup` 生成两份独立的随机密钥，保存在权限为 0600 的 `.localmcp/worker.json`：本地 agent 使用连接密钥，ChatGPT 使用 MCP URL 密钥。`worker:secrets` 仅把两份密钥的 SHA-256 摘要上传到你自己的 Worker。未配置密钥时 Worker 拒绝访问。不要提交 `.localmcp`；仓库已忽略该目录。
+首次 `worker:setup` 会生成：
 
-默认 Worker 名称为 `localmcp-relay`，可在 `worker/wrangler.jsonc` 修改。部署到已有同名 Worker 会更新它，首次使用应确保名称属于此项目。
+```text
+.localmcp/worker.json
+.localmcp/worker-secrets.json
+```
 
-## 启动本地 agent
+其中 `worker.json` 保存本机使用的原始凭证；`worker-secrets.json` 只包含需要上传到 Worker 的 SHA-256 摘要。
+
+部署后，复制 Wrangler 输出的实际 Worker 地址，例如：
+
+```text
+https://localmcp-relay.YOUR-SUBDOMAIN.workers.dev
+```
+
+重新写入实际 Worker 地址并上传密钥摘要：
 
 ```sh
-LOCALMCP_ROOT=/absolute/path/to/project LOCALMCP_SHELL=1 npm start
+node scripts/worker-setup.mjs https://localmcp-relay.YOUR-SUBDOMAIN.workers.dev
+npm run worker:secrets
 ```
 
-仅文件功能可直接 `npm start`。命令执行和 computer use 默认关闭，设置为 `1` 开启。computer use 需要安装 `cua-driver` 并授予其辅助功能、屏幕录制权限。
+然后启动：
 
-启动后打印完整 MCP URL，保存到 `.localmcp/connection.json`。保持进程运行；Ctrl+C 关闭 agent 和它管理的本地 MCP 服务。重新运行后使用同一个 Worker URL 和密钥。
+```sh
+localmcp start
+```
 
-在 ChatGPT“新插件”填写：
+如果是在源码仓库中运行，也可以：
 
-- 名称：`localmcp`
-- 描述：`在我的本地工作目录创建和修改文件、执行开发命令、操作本机应用。`
-- 连接：**服务器 URL**，填入完整 `https://localmcp-relay.…workers.dev/mcp/<密钥>`
-- 身份验证：**无 / None**（本版本无 OAuth，完整 URL 是访问凭证）
+```sh
+npm start
+```
 
-创建后检查工具列表，在新对话中启用插件。示例：“创建 hello.txt，内容是 hello localmcp，再读回来验证。”
+启动成功后 LocalMCP 会输出类似：
 
-完整 URL 能调用你启用的本地能力，请勿公开分享。Worker 通过 HTTPS/WSS 转发文件内容、命令结果和 GUI 图片；数据会经过你部署的 Cloudflare 服务。密钥摘要不是 OAuth 用户权限系统，本版本适合个人单机使用。
+```text
+Worker connected.
+ChatGPT 服务器 URL: https://...workers.dev/mcp/<密钥>
+身份验证: 无 (None)
+```
 
-## 连接行为
+把这个完整服务器 URL 添加到 ChatGPT 的 MCP/插件连接中即可。
 
-- Worker 用一个 Durable Object 管理一台本机。已经在线时，第二个 agent 连接被拒绝。
-- 连接掉线后指数退避重连，最长约 31 秒。心跳检查失效连接。
-- 本机离线返回 503；忙碌返回 429；调用超时返回 504；中途断线返回 502。
-- 不自动重放请求。502/504 后本地操作可能已经发生，应先查看结果，避免重复写入或执行命令。
-- HTTP 使用 MCP Streamable HTTP JSON 响应模式；不提供旧版 `/sse`，不提供服务器主动通知流。
-- HTTP 输入上限 2 MiB，中继结果上限 8 MiB，WebSocket 分片传输。一次执行一个请求，不缓存业务内容。大截图超过限制会明确报错。
-- Worker 请求等待上限 130 秒，本地转发上限 125 秒；网络/平台/ChatGPT 可能有更短的请求期限。长任务应拆分。
-- `/healthz` 只说明 Worker 存活，不代表本地 agent 在线。
+完整 URL 本身包含访问凭证，请勿公开、提交到 Git 或发给其他人。`.localmcp/` 已加入项目 `.gitignore`。
 
-## 工具
+## ChatGPT 中配置
 
-| 工具 | 功能 |
-| --- | --- |
-| `workspace_info` | 工作目录和启用能力 |
-| `list_directory` / `workspace_tree` | 分页列目录 / 递归查看项目树 |
-| `find_files` / `search_files` | 按文件名模式查找 / 搜索文本内容 |
-| `stat_path` | 查看文件或目录元数据 |
-| `read_file` / `read_file_lines` | 读取 UTF-8 文件 / 按行读取 |
-| `write_file` | 创建文件；覆盖使用原子替换 |
-| `edit_file` / `apply_patch` | 精确字符串替换 / 带可选 SHA-256 并发保护的多行编辑 |
-| `create_directory` / `delete_path` / `move_path` | 工作区内基础文件管理 |
-| `run_command` | 一次性 shell 命令、退出码、输出与超时状态 |
-| `start_process` / `read_process` / `write_process` / `stop_process` / `list_processes` | 持久开发进程、增量日志和 stdin |
-| `computer_*` | 转发 cua-driver 的原生 schema 与结果，包括图片 |
+在 ChatGPT 中创建 MCP/插件连接：
 
-computer use 工具列表由已安装驱动动态发现。驱动缺失或无法启动时，启用 GUI 能力的 MCP 初始化会失败；检查驱动安装及系统授权。
+```text
+名称：localmcp
+描述：在我的本地工作区读取和修改文件、执行开发命令，并使用已启用的本地 MCP 能力。
+服务器 URL：https://你的-worker/mcp/<密钥>
+身份验证：None
+```
+
+保持：
+
+```sh
+localmcp start
+```
+
+在本机运行。ChatGPT 的调用路径就是：
+
+```text
+ChatGPT → Worker → LocalMCP → 本机工具
+```
 
 ## 配置
 
-| 环境变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `LOCALMCP_ROOT` | 当前目录 | 文件工作目录，必须存在 |
-| `LOCALMCP_SHELL` | 关闭 | `1` 开启命令执行 |
-| `LOCALMCP_CUA_COMMAND` | `cua-driver` | GUI 驱动路径 |
-| `LOCALMCP_WORKER_URL` | worker.json | 覆盖 Worker origin，正式连接须 HTTPS |
-| `LOCALMCP_AGENT_PORT` | `8788` | agent 管理的回环 MCP 服务端口 |
-| `LOCALMCP_PORT` | `8787` | 独立 HTTP / Quick Tunnel 端口 |
-| `LOCALMCP_TOKEN` | 无 | 独立 HTTP 必填；agent 自动生成内部密钥 |
-
-文件工具拒绝目录穿越和符号链接，写入拒绝多重硬链接。这是应用层检查，**不是 OS 沙箱**，不防御本地恶意进程并发修改目录的竞争。
-
-shell 和 computer use 具有 OS 用户权限，可以访问工作目录之外的资源。shell 不继承服务密钥环境变量，但可读取本机用户能读取的文件。一次性命令输出上限 256 KiB、执行上限 120 秒。启用 shell 后也可启动由 LocalMCP 管理的持久进程；每个 stdout/stderr 环形缓冲最多保留约 1 MiB，agent 退出时会终止仍在运行的托管进程。文件直接修改，无自动回滚，建议使用 Git。
-
-## 更新和轮换
-
-```sh
-npm run build
-npm run check
-npm test
-npm run worker:deploy
-```
-
-重启本地 agent 加载新的本地代码。轮换密钥：先停止 agent，备份/移除 `.localmcp/worker.json`，运行 setup 重新生成并填写原域名，运行 `worker:secrets`，重启 agent，更新 ChatGPT URL。两份密钥应一起轮换。旧版本 Worker/agent 协议目前不保证兼容，更新时一起升级。
-
-## 其他连接方式
-
-- `npm run stdio`：标准 MCP stdio。
-- 设置 `LOCALMCP_TOKEN` 后 `npm run http`：本地 HTTP `/mcp` 支持 Bearer；`/mcp/<密钥>` 支持 URL 凭证。
-- `npm run start:quick`：保留 Cloudflare Quick Tunnel 兼容启动方式，需要 cloudflared，每次启动公网域名可能变化。
-
-## 验证
-
-`npm test` 包含文件边界、覆盖保护、命令超时、SDK stdio/HTTP 测试，以及在本机真实 workerd/Durable Object 模拟器上运行 Worker → WebSocket → agent → MCP 的端到端测试。测试用临时目录和测试密钥，不发送真实工作文件到公网。
-
-参考：[hostc 架构](https://github.com/akazwz/hostc#architecture)、[Cloudflare Durable Object WebSocket](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)、[ChatGPT MCP 接入](https://developers.openai.com/plugins/deploy/connect-chatgpt)。
-
-## Skills 与 MCP 扩展
-
-LocalMCP Core 只提供工作区文件、Shell/持久进程和 Worker relay。额外能力通过 Skill + 标准 MCP Server 扩展。Skill 是 `SKILL.md` 使用说明，MCP Server 提供真正的 tools；两者都通过 `localmcp.json` 配置。
-
-
-### `localmcp.json`
-
-推荐把 LocalMCP 自身功能、Skills 和 MCP 的启用状态统一放在项目根目录的 `localmcp.json`：
-
-```json
-{
-  "root": ".",
-  "features": { "files": true, "shell": true, "processes": true },
-  "skills": { "dir": "skills", "enabled": ["computer-use"] },
-  "mcpServers": {
-    "computer": { "enabled": true, "command": "cua-driver", "args": ["mcp"] }
-  }
-}
-```
-
-`enabled: false` 可关闭某个 MCP；`skills.enabled` 是 Skill allowlist。`LOCALMCP_CONFIG=/path/to/localmcp.json` 可指定其他配置文件。配置启动时使用 Zod 严格校验，未知字段、缺少 MCP `command` 或类型错误都会直接给出配置错误。仓库提供 `localmcp.example.json` 作为模板。部署相关的 token、端口等敏感/运行时值仍使用环境变量，避免写入配置文件。
-
-### 多工作区
-
-`localmcp.json` 可以声明多个固定工作区；不需要运行时 add/remove/switch。每个文件、Shell 和启动进程工具都接受可选 `workspace` 参数，不传时使用 `defaultWorkspace`：
+LocalMCP 默认读取用户级配置 `~/.localmcp/localmcp.json`；也可以通过 `LOCALMCP_CONFIG` 指定其他配置文件：
 
 ```json
 {
   "workspaces": {
-    "localmcp": "/Users/me/code/localmcp",
-    "app": "/Users/me/code/app"
+    "project": "."
   },
-  "defaultWorkspace": "localmcp"
+  "defaultWorkspace": "project",
+  "features": {
+    "files": true,
+    "shell": true,
+    "processes": true
+  },
+  "skills": {
+    "dir": "skills",
+    "enabled": ["local-development"]
+  },
+  "mcpServers": {}
 }
 ```
 
-使用 `list_workspaces` 查看已配置工作区。旧的单 `root` 配置仍兼容，并会映射成名为 `default` 的工作区。
+配置启动时使用 Zod 严格校验。仓库同时提供 `localmcp.example.json`。
+
+### 多工作区
+
+```json
+{
+  "workspaces": {
+    "frontend": "/Users/me/code/frontend",
+    "backend": "/Users/me/code/backend",
+    "localmcp": "/Users/me/code/localmcp"
+  },
+  "defaultWorkspace": "frontend"
+}
+```
+
+文件、Shell 和启动进程工具都接受可选的 `workspace` 参数；不传时使用 `defaultWorkspace`。
+
+使用 `list_workspaces` 可以查看当前工作区。旧的单 `root` 配置仍兼容。
+
+## Skills
+
+Skill 是给模型读取的操作说明，而不是工具实现本身。
+
+```text
+skills/
+├── local-development/
+│   └── SKILL.md
+└── computer-use/
+    └── SKILL.md
+```
+
+例如 `local-development` 会指导 Agent：
+
+- 文件读取优先使用 `read_file` / `read_file_lines`
+- 修改优先使用 `edit_file` / `apply_patch` / `write_file`
+- 搜索优先使用 `search_files` / `find_files`
+- Shell 主要用于 build、test、Git、package manager 和开发服务器
+
+启用 Skill：
+
+```json
+{
+  "skills": {
+    "dir": "skills",
+    "enabled": ["local-development"]
+  }
+}
+```
+
+## MCP 扩展
+
+LocalMCP Core 不需要自己实现 Computer Use、浏览器、数据库等高级能力。标准 MCP Server 可以直接作为插件挂载。
+
+例如 Computer Use：
+
+```json
+{
+  "skills": {
+    "dir": "skills",
+    "enabled": ["local-development", "computer-use"]
+  },
+  "mcpServers": {
+    "computer": {
+      "enabled": true,
+      "command": "cua-driver",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+LocalMCP 会读取 MCP Server 的 tools，并添加 server namespace。例如：
+
+```text
+computer_get_window_state
+computer_click
+computer_type_text
+```
+
+因此整体关系是：
+
+```text
+Skill = 告诉模型怎么使用一种能力
+MCP   = 真正提供工具
+Core  = Workspace + Files + Shell + Process + Skill Loader + MCP Loader + Relay
+```
+
+## 内置工具
+
+| 工具 | 功能 |
+| --- | --- |
+| `workspace_info` / `list_workspaces` | 当前工作区 / 工作区列表 |
+| `list_directory` / `workspace_tree` | 查看目录 / 项目树 |
+| `find_files` / `search_files` | 查找文件 / 搜索内容 |
+| `stat_path` | 文件或目录信息 |
+| `read_file` / `read_file_lines` | 读取文件 |
+| `write_file` | 创建或覆盖文件 |
+| `edit_file` / `apply_patch` | 精确编辑 / 多行编辑 |
+| `create_directory` / `delete_path` / `move_path` | 文件管理 |
+| `run_command` | 执行一次性 Shell 命令 |
+| `start_process` / `read_process` / `write_process` / `stop_process` / `list_processes` | 持久开发进程 |
+| `list_skills` / `read_skill` | Skill |
+| `<server>_*` | 外部 MCP Server tools |
+
+## 安全边界
+
+文件工具会限制在配置的 Workspace 内，并拒绝目录穿越和符号链接等危险路径。
+
+但需要注意：
+
+- LocalMCP **不是 OS 沙箱**。
+- 启用 Shell 后，命令拥有当前 OS 用户权限。
+- 外部 MCP Server 也可能拥有当前用户权限。
+- Worker 会转发文件内容、命令结果以及 MCP 返回的数据。
+- 完整 `/mcp/<密钥>` URL 是访问凭证。
+- 建议开发项目本身使用 Git，以便查看和回滚修改。
+
+Worker 不缓存业务内容；本机离线返回 503，忙碌返回 429，超时返回 504。发生 502/504 时，本地操作可能已经执行，不应自动重复写操作。
+
+## 其他连接方式
+
+LocalMCP 也可以不经过 Worker：
+
+```sh
+localmcp stdio
+```
+
+或者本地 HTTP：
+
+```sh
+LOCALMCP_TOKEN=<至少32字符的密钥> localmcp http
+```
+
+Worker 模式主要解决的是：**让 ChatGPT 网页端通过固定 HTTPS MCP 地址访问主动连接出去的本机 LocalMCP。**
+
+## 开发
+
+```sh
+git clone git@github.com:daodao97/locamcp.git
+cd locamcp
+npm ci
+npm run check
+npm test
+npm run build
+```
+
+GitHub: `daodao97/locamcp`
+
+npm: `@daodao97/localmcp`
+
+## License
+
+ISC

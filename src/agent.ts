@@ -1,28 +1,35 @@
 #!/usr/bin/env node
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { homedir } from 'node:os';
 import WebSocket from 'ws';
 import { Assembly, frames, parseFrame, MAX_BYTES } from './relay-protocol.js';
 
 interface Settings { workerUrl: string; agentToken: string; mcpToken: string }
-const settings: Settings = JSON.parse(await readFile(resolve('.localmcp/worker.json'),'utf8'));
+const stateDir=resolve(homedir(),'.localmcp');
+const pidFile=resolve(stateDir,'agent.pid');
+await writeFile(pidFile,String(process.pid),{mode:0o600});
+const settings: Settings = JSON.parse(await readFile(resolve(stateDir,'worker.json'),'utf8'));
 const origin = new URL(process.env.LOCALMCP_WORKER_URL || settings.workerUrl);
 if (origin.protocol !== 'https:' && !(origin.protocol === 'http:' && ['localhost','127.0.0.1'].includes(origin.hostname))) throw new Error('Worker URL must use HTTPS');
 if (origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new Error('Worker URL must be an origin');
 const localToken = randomBytes(32).toString('hex');
 const port = Number(process.env.LOCALMCP_AGENT_PORT || 8788);
-const local = spawn(process.execPath,[fileURLToPath(new URL('./index.js',import.meta.url)),'http'],{env:{...process.env,LOCALMCP_PORT:String(port),LOCALMCP_TOKEN:localToken},stdio:['ignore','ignore','inherit']});
+let local: ChildProcess;
+function spawnLocal(){return spawn(process.execPath,[fileURLToPath(new URL('./index.js',import.meta.url)),'http'],{env:{...process.env,LOCALMCP_PORT:String(port),LOCALMCP_TOKEN:localToken},stdio:['ignore','ignore','inherit']});}
+function watchLocal(child:ChildProcess){child.on('error',error=>{console.error(error.message);stop(1);});child.on('exit',code=>{if(!closing&&child===local){console.error(`Local server exited (${code})`);stop(1);}});}
+local=spawnLocal();watchLocal(local);
 let closing=false, socket: WebSocket | undefined, reconnect: ReturnType<typeof setTimeout> | undefined;
 function stop(code=0) {
   if (closing) return; closing=true; clearTimeout(reconnect); socket?.terminate(); local.kill('SIGTERM');
+  unlink(pidFile).catch(()=>{});
   setTimeout(() => {local.kill('SIGKILL'); process.exit(code);},1500);
 }
 process.once('SIGINT',()=>stop()); process.once('SIGTERM',()=>stop());
-local.on('error',error=>{console.error(error.message);stop(1);});
-local.on('exit',code=>{if (!closing) {console.error(`Local server exited (${code})`);stop(1);}});
+process.on('SIGHUP',()=>{console.error('Reloading LocalMCP configuration...');const previous=local;previous.once('exit',()=>{if(closing)return;local=spawnLocal();watchLocal(local);});previous.kill('SIGTERM');});
 let ready=false;
 for (let i=0;i<100 && !closing;i++) {
   try {const r=await fetch(`http://127.0.0.1:${port}/mcp`,{headers:{Authorization:`Bearer ${localToken}`},signal:AbortSignal.timeout(500)});if(r.status===405){ready=true;break;}} catch {}
@@ -31,7 +38,7 @@ for (let i=0;i<100 && !closing;i++) {
 if (!ready) {stop(1);} else {
   let attempt=0, busy=false;
   const mcpUrl=new URL(`/mcp/${settings.mcpToken}`,origin).href;
-  await writeFile(resolve('.localmcp/connection.json'),JSON.stringify({url:mcpUrl,authentication:'none',transport:'worker-websocket',root:process.env.LOCALMCP_ROOT||process.cwd()},null,2),{mode:0o600});
+  await writeFile(resolve(stateDir,'connection.json'),JSON.stringify({url:mcpUrl,authentication:'none',transport:'worker-websocket',root:process.env.LOCALMCP_ROOT||process.cwd()},null,2),{mode:0o600});
   const wsUrl=new URL('/agent',origin);wsUrl.protocol=origin.protocol==='https:'?'wss:':'ws:';
   function connect() {
     if (closing) return;

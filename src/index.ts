@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { timingSafeEqual } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -9,10 +10,35 @@ import { McpLoader } from './mcp/loader.js';
 import { loadSkills } from './skills/loader.js';
 import { ProcessManager } from './process.js';
 
+async function ensureInitialized(force = false) {
+  const {copyFile, access, cp, mkdir} = await import('node:fs/promises');
+  const {dirname, resolve} = await import('node:path');
+  const {homedir} = await import('node:os');
+  const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const configDir = resolve(homedir(), '.localmcp');
+  const target = resolve(configDir, 'localmcp.json');
+  const skillsTarget = resolve(configDir, 'skills');
+  await mkdir(configDir,{recursive:true,mode:0o700});
+  let created = false;
+  try {await access(target);} catch (error:any) {if(error.code!=='ENOENT')throw error;await copyFile(resolve(packageRoot,'localmcp.example.json'),target);created=true;}
+  try {await access(skillsTarget);} catch (error:any) {if(error.code!=='ENOENT')throw error;await cp(resolve(packageRoot,'skills'),skillsTarget,{recursive:true});created=true;}
+  if (created || force) console.log(created ? `Initialized ${configDir}` : `Already initialized: ${configDir}`);
+}
+
 async function main() {
+  let mode = process.argv[2] || 'start';
+  if (mode === 'init') {await ensureInitialized(true); return;}
+  if (mode === 'reload') {
+    const {readFile} = await import('node:fs/promises');
+    const {resolve} = await import('node:path');
+    const {homedir} = await import('node:os');
+    const pid = Number(await readFile(resolve(homedir(),'.localmcp','agent.pid'),'utf8'));
+    if (!Number.isInteger(pid) || pid <= 0) throw new Error('LocalMCP is not running');
+    process.kill(pid,'SIGHUP'); console.log('LocalMCP reload requested.'); return;
+  }
+  if (mode === 'start' || mode === 'agent') {await ensureInitialized(); await import('./agent.js'); return;}
   const cfg = await config();
-  const mode = process.argv[2] || 'stdio';
-  if (!['stdio', 'http'].includes(mode)) throw new Error('Usage: localmcp [stdio|http]');
+  if (!['stdio', 'http'].includes(mode)) throw new Error('Usage: localmcp [start|reload|init|stdio|http]');
   if (mode === 'http' && (!cfg.token || cfg.token.length < 32)) throw new Error('HTTP requires LOCALMCP_TOKEN with at least 32 characters');
   const mcp = new McpLoader(cfg.mcpServers);
   await mcp.start();

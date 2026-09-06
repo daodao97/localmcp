@@ -1,5 +1,6 @@
 import { realpath, stat, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { z } from 'zod';
 import type { McpServerConfig } from './mcp/loader.js';
 
@@ -21,14 +22,16 @@ function parseConfig(raw:unknown,path:string):FileConfig{
  throw new Error(`Invalid LocalMCP config ${path}: ${details}`);
 }
 async function readConfig():Promise<{value:FileConfig;base:string;path?:string}>{
- const explicit=process.env.LOCALMCP_CONFIG,path=resolve(explicit||'localmcp.json');
+ const explicit=process.env.LOCALMCP_CONFIG,path=explicit?resolve(explicit):resolve(homedir(),'.localmcp','localmcp.json');
  try{return {value:parseConfig(JSON.parse(await readFile(path,'utf8')),path),base:dirname(path),path};}
- catch(e:any){if(e instanceof SyntaxError)throw new Error(`Invalid JSON in LocalMCP config ${path}: ${e.message}`);if(e.code!=='ENOENT')throw e;return {value:localMcpConfigSchema.parse({}),base:process.cwd()};}
+ catch(e:any){if(e instanceof SyntaxError)throw new Error(`Invalid JSON in LocalMCP config ${path}: ${e.message}`);if(e.code!=='ENOENT')throw e;return {value:localMcpConfigSchema.parse({}),base:homedir()};}
 }
 export async function config():Promise<Config>{
  const loaded=await readConfig(),c=loaded.value;
- const configured=c.workspaces&&Object.keys(c.workspaces).length?c.workspaces:{default:process.env.LOCALMCP_ROOT||c.root||'.'};
- const workspaces:Record<string,string>={};for(const [name,path] of Object.entries(configured)){const root=await realpath(resolve(loaded.base,path));if(!(await stat(root)).isDirectory())throw new Error(`Workspace '${name}' must be a directory`);workspaces[name]=root;}
+ const configured=c.workspaces&&Object.keys(c.workspaces).length?c.workspaces:{default:c.root||'.'};
+ const rootOverride=process.env.LOCALMCP_ROOT;
+ const expand=(path:string)=>path==='~'||path.startsWith('~/')?resolve(homedir(),path.slice(2)):resolve(loaded.base,path);
+ const workspaces:Record<string,string>={};for(const [name,path] of Object.entries(configured)){const selected=rootOverride&&name===(c.defaultWorkspace||Object.keys(configured)[0])?rootOverride:path;const root=await realpath(expand(selected));if(!(await stat(root)).isDirectory())throw new Error(`Workspace '${name}' must be a directory`);workspaces[name]=root;}
  const defaultWorkspace=c.defaultWorkspace||Object.keys(workspaces)[0];if(!workspaces[defaultWorkspace])throw new Error(`Unknown defaultWorkspace '${defaultWorkspace}'`);
  const root=workspaces[defaultWorkspace];
  const port=Number(process.env.LOCALMCP_PORT||8787);if(!Number.isInteger(port)||port<1||port>65535)throw new Error('Invalid LOCALMCP_PORT');

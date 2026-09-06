@@ -55,7 +55,7 @@ export class McpRelay {
       return new Response(null,{status:101,webSocket:pair[0]});
     }
     const socket = this.ctx.getWebSockets('agent')[0];
-    if (!socket) return json({error:'Local agent offline. Start npm start.'},503);
+    if (!socket) return json({error:'Local agent offline. Start localmcp start.'},503);
     // Reject overlapping requests rather than queue side effects beyond an HTTP deadline.
     if (this.pending.size) return json({error:'Local agent busy. Do not automatically retry write operations.'},429);
     const id = crypto.randomUUID();

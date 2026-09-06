@@ -1,8 +1,22 @@
 {
   "name": "localmcp",
   "version": "0.3.0",
-  "description": "Local development and computer-use MCP bridge for ChatGPT",
+  "description": "Local MCP bridge for ChatGPT with files, shell, skills, pluggable MCP servers and multiple workspaces",
   "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "localmcp": "dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "src/relay-protocol.ts",
+    "skills/",
+    "scripts/",
+    "worker/",
+    "localmcp.example.json",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/agent.js",
@@ -11,16 +25,31 @@
     "dev": "tsx src/index.ts",
     "test": "tsx --test test/*.test.ts",
     "check": "tsc --noEmit && tsc -p worker/tsconfig.json",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check && npm test && npm run build",
     "start:quick": "node dist/launch.js",
     "worker:setup": "node scripts/worker-setup.mjs",
     "worker:dev": "wrangler dev --config worker/wrangler.jsonc",
     "worker:deploy": "wrangler deploy --config worker/wrangler.jsonc",
     "worker:secrets": "wrangler secret bulk .localmcp/worker-secrets.json --config worker/wrangler.jsonc"
   },
-  "keywords": [],
-  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/daodao97/locamcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/daodao97/locamcp/issues"
+  },
+  "homepage": "https://github.com/daodao97/locamcp#readme",
+  "keywords": ["mcp", "model-context-protocol", "chatgpt", "local", "agent", "skills"],
+  "author": "daodao97",
   "license": "ISC",
-  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "express": "^5.2.1",
@@ -35,9 +64,5 @@
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "wrangler": "^4.129.0"
-  },
-  "bin": {
-    "localmcp": "dist/index.js"
-  },
-  "private": true
+  }
 }

@@ -3,6 +3,7 @@ dist/
 .env
 .localmcp/
 *.log
+*.tgz
+localmcp.json
 .wrangler/
 .dev.vars*
-localmcp.json
