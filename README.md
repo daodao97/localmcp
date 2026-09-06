@@ -62,7 +62,7 @@ npm install -g @daodao97/localmcp
 localmcp
 ```
 
-需要 Node.js 22+。LocalMCP 按全局工具使用，不需要单独创建 `my-localmcp` 目录，也不需要主动执行 `init`。首次运行 `localmcp` 或 `localmcp start` 时会自动初始化用户配置并启动 Agent。
+需要 Node.js 22+。LocalMCP 按全局工具使用，不需要单独创建项目目录。首次运行 `localmcp` 时会自动创建所需的用户配置并启动 Agent。
 
 LocalMCP 的用户级配置统一位于 `~/.localmcp/`：
 
@@ -77,10 +77,9 @@ LocalMCP 的用户级配置统一位于 `~/.localmcp/`：
 常用命令：
 
 ```sh
-localmcp          # 默认：自动初始化（如需要）并启动
-localmcp start    # 显式启动
+localmcp          # 默认启动；首次运行自动创建配置
+localmcp start    # 显式启动（与 localmcp 等价）
 localmcp reload   # 重新加载配置并重启本地 MCP 服务
-localmcp init     # 可选：仅初始化/检查用户配置
 localmcp stdio    # 标准 MCP stdio 模式
 localmcp http     # 本地 HTTP 模式
 ```
@@ -98,8 +97,7 @@ LocalMCP 的设计支持两种 Worker 使用方式：
 
 ```sh
 npm install -g @daodao97/localmcp
-localmcp init
-localmcp start
+localmcp
 ```
 
 **当前开源版本需要注意：**现有 Worker 实现使用单组 `MCP_TOKEN_HASH` / `AGENT_TOKEN_HASH`，还没有实现公共 Worker 所需的多用户注册、凭证签发和隔离。因此在公共 Worker 的账号/凭证 provisioning 完成前，`localmcp start` 仍需要 `.localmcp/worker.json`。不要把一个单用户 Worker 的密钥共享给多个不受信任用户。
