@@ -2,6 +2,7 @@
 import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createServer as createNetServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -31,9 +32,22 @@ const origin = new URL(process.env.LOCALMCP_WORKER_URL || settings.workerUrl);
 if (origin.protocol !== 'https:' && !(origin.protocol === 'http:' && ['localhost','127.0.0.1'].includes(origin.hostname))) throw new Error('Worker URL must use HTTPS');
 if (origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new Error('Worker URL must be an origin');
 const localToken = randomBytes(32).toString('hex');
-const port = Number(process.env.LOCALMCP_AGENT_PORT || 8788);
+async function findFreePort(){
+  if(process.env.LOCALMCP_AGENT_PORT)return Number(process.env.LOCALMCP_AGENT_PORT);
+  return await new Promise<number>((resolvePort,reject)=>{
+    const server=createNetServer();
+    server.once('error',reject);
+    server.listen(0,'127.0.0.1',()=>{
+      const address=server.address();
+      if(!address||typeof address==='string'){server.close();reject(new Error('Unable to allocate local port'));return;}
+      const selected=address.port;
+      server.close(error=>error?reject(error):resolvePort(selected));
+    });
+  });
+}
+const port = await findFreePort();
 let local: ChildProcess;
-function spawnLocal(){return spawn(process.execPath,[fileURLToPath(new URL('./index.js',import.meta.url)),'http'],{env:{...process.env,LOCALMCP_PORT:String(port),LOCALMCP_TOKEN:localToken},stdio:['ignore','ignore','inherit']});}
+function spawnLocal(){return spawn(process.execPath,[fileURLToPath(new URL('./index.js',import.meta.url)),'http'],{env:{...process.env,LOCALMCP_PORT:String(port),LOCALMCP_TOKEN:localToken,LOCALMCP_INTERNAL:'1'},stdio:['ignore','ignore','inherit']});}
 function watchLocal(child:ChildProcess){child.on('error',error=>{console.error(error.message);stop(1);});child.on('exit',code=>{if(!closing&&child===local){console.error(`Local server exited (${code})`);stop(1);}});}
 local=spawnLocal();watchLocal(local);
 let closing=false, socket: WebSocket | undefined, reconnect: ReturnType<typeof setTimeout> | undefined;
@@ -60,7 +74,7 @@ if (!ready) {stop(1);} else {
     const ws=new WebSocket(wsUrl,{headers:{Authorization:`Bearer ${settings.agentToken}`},handshakeTimeout:15000,maxPayload:160000});socket=ws;
     let assembly: Assembly | undefined, requestId: string | undefined, pong=Date.now();
     const heartbeat=setInterval(()=>{if(ws.readyState!==WebSocket.OPEN)return;if(Date.now()-pong>65000){ws.terminate();return;}ws.send('ping');},25000);
-    ws.on('open',()=>{attempt=0; console.error('Worker connected.'); console.log(`ChatGPT 服务器 URL: ${mcpUrl}\n身份验证: 无 (None)`);});
+    ws.on('open',()=>{attempt=0; console.log(`LocalMCP is running\n\nMCP URL:\n${mcpUrl}\n\nAuthentication: None\nConfig: ~/.localmcp/localmcp.json\n\nPress Ctrl+C to stop.`);});
     const respond=(id:string,value:unknown)=>{if(ws.readyState===WebSocket.OPEN)for(const frame of frames(id,value))ws.send(frame);};
     ws.on('message', async raw=>{
       const message=raw.toString();if(message==='pong'){pong=Date.now();return;}

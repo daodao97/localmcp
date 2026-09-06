@@ -82,7 +82,7 @@ async function main() {
       } finally {await transport?.close(); await server?.close(); release();}
     });
     app.all(['/mcp', '/mcp/:token'], (_req,res) => {res.setHeader('Allow','POST'); res.sendStatus(405);});
-    const listener = app.listen(cfg.port, '127.0.0.1', () => console.error(`localmcp listening on http://127.0.0.1:${cfg.port}/mcp`));
+    const listener = app.listen(cfg.port, '127.0.0.1', () => {if(process.env.LOCALMCP_INTERNAL!=='1')console.error(`localmcp listening on http://127.0.0.1:${cfg.port}/mcp`);});
     listener.on('error', error => {console.error(error.message); process.exit(1);});
     shutdown.push(() => new Promise<void>(r => listener.close(() => r())));
   }
