@@ -1,6 +1,6 @@
 {
   "name": "@daodao97/localmcp",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Local MCP bridge for ChatGPT with files, shell, skills, pluggable MCP servers and multiple workspaces",
   "main": "dist/index.js",
   "type": "module",
