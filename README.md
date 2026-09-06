@@ -33,47 +33,6 @@ localmcp agent    # 前台运行，便于调试
 
 日志位于 `~/.localmcp/agent.log`。也支持 `localmcp stdio`，或通过 `LOCALMCP_TOKEN=<至少32字符的密钥> localmcp http` 启动本地 HTTP 服务。
 
-## 配置与扩展
-
-编辑 `~/.localmcp/localmcp.json`，然后运行 `localmcp reload`。以下示例配置工作区并开启 Shell：
-
-```json
-{
-  "workspaces": {
-    "project": "/Users/me/code/project"
-  },
-  "defaultWorkspace": "project",
-  "features": {
-    "files": true,
-    "shell": true,
-    "processes": true
-  },
-  "skills": {
-    "dir": "skills",
-    "enabled": ["local-development"]
-  },
-  "mcpServers": {}
-}
-```
-
-- **多工作区**：在 `workspaces` 中添加路径，调用工具时用 `workspace` 选择；省略时使用默认工作区。
-- **Skills**：将操作说明放入 `~/.localmcp/skills/<名称>/SKILL.md`，并在 `skills.enabled` 中启用。
-- **MCP 扩展**：在 `mcpServers` 中配置标准 MCP Server，例如下方的 Computer Use 服务；工具会带上 `computer_` 前缀。
-
-```json
-{
-  "mcpServers": {
-    "computer": {
-      "enabled": true,
-      "command": "cua-driver",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-完整配置示例见 [localmcp.example.json](localmcp.example.json)。可通过 `LOCALMCP_CONFIG` 指定其他配置文件。
-
 ## 自建 Worker（可选）
 
 将中继部署到自己的 Cloudflare 账号，再让本机 LocalMCP 连接它。需要 Cloudflare 和 GitHub 账号。
@@ -122,20 +81,21 @@ LOCALMCP_WORKER_URL=https://localmcp-relay.YOUR-SUBDOMAIN.workers.dev localmcp
 
 ### 3. 在 ChatGPT 中使用
 
-运行 `localmcp status`，复制输出的完整 MCP URL（包含 `/mcp/<设备ID>/<密钥>`），在 ChatGPT 的 MCP 连接中填写该 URL，身份验证选择 **None**。切换 Worker 后，需要同步更新 ChatGPT 中的服务器 URL。
+1. 运行 `localmcp status`，复制输出的完整 MCP URL（包含 `/mcp/<设备ID>/<密钥>`）。
+2. 在 ChatGPT 网页端 打开开发者模式, [点我打开](https://chatgpt.com/#settings/Security?section=developer-mode)
 
-保持本机在线、LocalMCP 后台服务运行，即可让 ChatGPT 调用本机工具。连接失败时，先用下面的命令确认 Worker 正常，再检查 `localmcp status` 和 `~/.localmcp/agent.log`：
+   ![在 ChatGPT 中开启开发者模式](chatgpt_setting.png)
+
+3. 在 ChatGPT 网页端 新建插件, [点我打开](https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins)
+
+   ![在 ChatGPT 中添加 LocalMCP 插件](chatgpt_plugin.png)
+
+4. 在对话中 @LocalMCP 开始使用
 
 ```sh
 curl https://localmcp-relay.YOUR-SUBDOMAIN.workers.dev/healthz
 # 预期：{"ok":true,"service":"localmcp-relay","registration":true}
 ```
-
-自建 Worker 默认也开放设备注册；每台设备使用独立凭证，部署在你账号下的请求和资源用量由该账号承担。
-
-## 安全边界
-
-文件工具限制在配置的工作区内，但 LocalMCP **不是 OS 沙箱**：Shell 和外部 MCP Server 可拥有当前用户权限。Worker 会转发文件内容、命令结果及工具返回的数据。请仅配置可信的工作区和 MCP Server。
 
 ## 开发
 
@@ -146,6 +106,47 @@ npm test
 npm run build
 ```
 
+## 配置与扩展
+
+编辑 `~/.localmcp/localmcp.json`，然后运行 `localmcp reload`。以下示例配置工作区并开启 Shell：
+
+```json
+{
+  "workspaces": {
+    "project": "/Users/me/code/project"
+  },
+  "defaultWorkspace": "project",
+  "features": {
+    "files": true,
+    "shell": true,
+    "processes": true
+  },
+  "skills": {
+    "dir": "skills",
+    "enabled": ["local-development"]
+  },
+  "mcpServers": {}
+}
+```
+
+- **多工作区**：在 `workspaces` 中添加路径，调用工具时用 `workspace` 选择；省略时使用默认工作区。
+- **Skills**：将操作说明放入 `~/.localmcp/skills/<名称>/SKILL.md`，并在 `skills.enabled` 中启用。
+- **MCP 扩展**：在 `mcpServers` 中配置标准 MCP Server，例如下方的 Computer Use 服务；工具会带上 `computer_` 前缀。
+
+```json
+{
+  "mcpServers": {
+    "computer": {
+      "enabled": true,
+      "command": "cua-driver",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+完整配置示例见 [localmcp.example.json](localmcp.example.json)。可通过 `LOCALMCP_CONFIG` 指定其他配置文件。
+
 ## License
 
-ISC
+MIT

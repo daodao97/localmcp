@@ -5,7 +5,7 @@
   "defaultWorkspace": "home",
   "features": {
     "files": true,
-    "shell": false,
+    "shell": true,
     "processes": true
   },
   "skills": {

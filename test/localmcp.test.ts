@@ -38,19 +38,21 @@ test('real SDK stdio initialization and create/read/edit/list round trip', async
   const transport = new StdioClientTransport({command:process.execPath,args:[resolve('dist/index.js'),'stdio'],env:{LOCALMCP_ROOT:root,LOCALMCP_CONFIG:'/nonexistent/localmcp-test.json'},stderr:'pipe'});
   await client.connect(transport); t.after(() => client.close());
   const tools = await client.listTools();
-  assert.equal(tools.tools.length,17);
-  assert.ok(!tools.tools.some(t => t.name === 'run_command'));
+  assert.equal(tools.tools.length,23);
+  assert.ok(tools.tools.some(t => t.name === 'run_command'));
   const call = (name: string,args: any) => client.callTool({name,arguments:args});
   assert.equal((await call('write_file',{path:'hello.txt',content:'hello world'})).isError,undefined);
   assert.equal((await call('edit_file',{path:'hello.txt',oldText:'world',newText:'MCP'})).isError,undefined);
   assert.equal(await readFile(join(root,'hello.txt'),'utf8'),'hello MCP');
   assert.equal((await call('edit_file',{path:'hello.txt',oldText:'missing',newText:'bad'})).isError,true);
   assert.equal((await call('read_file',{path:'../no'})).isError,true);
-  assert.equal((await call('run_command',{command:'pwd'})).isError,true);
+  const commandResult:any = await call('run_command',{command:'printf shell-enabled'});
+  assert.equal(commandResult.isError,undefined);
+  assert.equal(JSON.parse(commandResult.content[0].text).output,'shell-enabled');
 });
 test('HTTP URL credential, origin rejection and SDK round trip', async t => {
   const root = await temp(t), token = 'a'.repeat(64), port = 18000 + Math.floor(Math.random()*20000);
-  const child = spawn(process.execPath,[resolve('dist/index.js'),'http'],{env:{...process.env,LOCALMCP_CONFIG:'/nonexistent/localmcp-test.json',LOCALMCP_ROOT:root,LOCALMCP_PORT:String(port),LOCALMCP_TOKEN:token},stdio:'ignore'});
+  const child = spawn(process.execPath,[resolve('dist/index.js'),'http'],{env:{...process.env,LOCALMCP_CONFIG:'/nonexistent/localmcp-test.json',LOCALMCP_ROOT:root,LOCALMCP_SHELL:'0',LOCALMCP_PORT:String(port),LOCALMCP_TOKEN:token},stdio:'ignore'});
   t.after(() => {child.kill('SIGTERM');});
   const base = `http://127.0.0.1:${port}`;
   let ready = false;
@@ -62,7 +64,10 @@ test('HTTP URL credential, origin rejection and SDK round trip', async t => {
   const client = new Client({name:'test',version:'1'});
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp/${token}`)));
   t.after(() => client.close());
-  assert.equal((await client.listTools()).tools.length,17);
+  const tools = await client.listTools();
+  assert.equal(tools.tools.length,17);
+  assert.ok(!tools.tools.some(t => t.name === 'run_command'));
+  assert.equal((await client.callTool({name:'run_command',arguments:{command:'pwd'}})).isError,true);
   const result = await client.callTool({name:'write_file',arguments:{path:'http.txt',content:'over HTTP'}});
   assert.equal(result.isError,undefined);
   assert.equal(await readFile(join(root,'http.txt'),'utf8'),'over HTTP');

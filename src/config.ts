@@ -9,7 +9,7 @@ export const localMcpConfigSchema=z.object({
   root:z.string().optional(),
   workspaces:z.record(z.string().min(1),z.string().min(1)).optional(),
   defaultWorkspace:z.string().min(1).optional(),
-  features:z.object({files:z.boolean().optional().default(true),shell:z.boolean().optional().default(false),processes:z.boolean().optional().default(true)}).strict().optional().default({files:true,shell:false,processes:true}),
+  features:z.object({files:z.boolean().optional().default(true),shell:z.boolean().optional().default(true),processes:z.boolean().optional().default(true)}).strict().optional().default({files:true,shell:true,processes:true}),
   skills:z.object({dir:z.string().optional().default('skills'),enabled:z.array(z.string().min(1)).optional()}).strict().optional().default({dir:'skills'}),
   mcpServers:z.record(z.string(),mcpEntrySchema).optional().default({}),
 }).strict();
