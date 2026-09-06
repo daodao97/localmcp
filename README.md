@@ -1,4 +1,4 @@
-# LocalMCP
+# LocalMCP - 榨干 ChatGPT 的所有价值
 
 让 ChatGPT 网页端使用你的本机开发能力：文件操作、Shell、持久进程、Skills 和可插拔 MCP Server。
 
