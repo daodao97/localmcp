@@ -28,17 +28,15 @@ async function ensureInitialized(force = false) {
 async function main() {
   let mode = process.argv[2] || 'start';
   if (mode === 'init') {await ensureInitialized(true); return;}
-  if (mode === 'reload') {
-    const {readFile} = await import('node:fs/promises');
-    const {resolve} = await import('node:path');
-    const {homedir} = await import('node:os');
-    const pid = Number(await readFile(resolve(homedir(),'.localmcp','agent.pid'),'utf8'));
-    if (!Number.isInteger(pid) || pid <= 0) throw new Error('LocalMCP is not running');
-    process.kill(pid,'SIGHUP'); console.log('LocalMCP reload requested.'); return;
+  if (['start', 'stop', 'reload', 'status'].includes(mode)) {
+    const {control, status, printStatus} = await import('./lifecycle.js');
+    if (mode === 'status') printStatus(await status());
+    else await control(mode as 'start' | 'stop' | 'reload', ensureInitialized);
+    return;
   }
-  if (mode === 'start' || mode === 'agent') {await ensureInitialized(); await import('./agent.js'); return;}
+  if (mode === 'agent') {await ensureInitialized(); await import('./agent.js'); return;}
   const cfg = await config();
-  if (!['stdio', 'http'].includes(mode)) throw new Error('Usage: localmcp [start|reload|init|stdio|http]');
+  if (!['stdio', 'http'].includes(mode)) throw new Error('Usage: localmcp [start|status|stop|reload|init|agent|stdio|http]');
   if (mode === 'http' && (!cfg.token || cfg.token.length < 32)) throw new Error('HTTP requires LOCALMCP_TOKEN with at least 32 characters');
   const mcp = new McpLoader(cfg.mcpServers);
   await mcp.start();

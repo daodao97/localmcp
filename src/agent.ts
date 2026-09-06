@@ -5,23 +5,34 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer as createNetServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import { homedir } from 'node:os';
+import { stateDir, logFile, serveControl } from './lifecycle.js';
+import { config } from './config.js';
 import WebSocket from 'ws';
 import { Assembly, frames, parseFrame, MAX_BYTES } from './relay-protocol.js';
 
 interface Settings { workerUrl: string; agentToken: string; mcpToken: string; deviceId?: string }
 const DEFAULT_PUBLIC_WORKER_URL='https://localmcp-relay.daodao973597.workers.dev';
-const stateDir=resolve(homedir(),'.localmcp');
+
 await mkdir(stateDir,{recursive:true,mode:0o700});
 const pidFile=resolve(stateDir,'agent.pid');
+let closing = false, ready = false, mcpUrl: string | null = null;
+let local: ChildProcess | undefined, socket: WebSocket | undefined, reconnect: ReturnType<typeof setTimeout> | undefined;
+let reloading: Promise<void> | undefined;
+const closeControl = await serveControl(() => ({status: 'running', pid: process.pid, url: mcpUrl,
+  config: resolve(process.env.LOCALMCP_CONFIG || resolve(stateDir, 'localmcp.json')), log: logFile, ready}),
+  () => stop(), () => reloading ??= reloadLocal().finally(() => {reloading = undefined;}));
 await writeFile(pidFile,String(process.pid),{mode:0o600});
+process.once('SIGINT',()=>stop()); process.once('SIGTERM',()=>stop());
+process.on('SIGHUP',()=>{if(!reloading) reloading=reloadLocal().catch(error=>console.error(error.message)).finally(()=>{reloading=undefined;});});
+process.on('uncaughtException', error=>{console.error(error);stop(1);});
+process.on('unhandledRejection', error=>{console.error(error);stop(1);});
 const workerFile=resolve(stateDir,'worker.json');
 let settings:Settings;
 try{settings=JSON.parse(await readFile(workerFile,'utf8'));}
 catch(error:any){
   if(error.code!=='ENOENT')throw error;
   const workerUrl=process.env.LOCALMCP_WORKER_URL||DEFAULT_PUBLIC_WORKER_URL;
-  const response=await fetch(new URL('/register',workerUrl),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  const response=await fetch(new URL('/register',workerUrl),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(15000)});
   if(!response.ok)throw new Error(`Public Worker registration failed (${response.status}). Set LOCALMCP_WORKER_URL to a self-hosted Worker if needed.`);
   const registered=await response.json() as Settings;
   settings={workerUrl:registered.workerUrl,agentToken:registered.agentToken,mcpToken:registered.mcpToken,deviceId:registered.deviceId};
@@ -46,27 +57,49 @@ async function findFreePort(){
   });
 }
 const port = await findFreePort();
-let local: ChildProcess;
+
 function spawnLocal(){return spawn(process.execPath,[fileURLToPath(new URL('./index.js',import.meta.url)),'http'],{env:{...process.env,LOCALMCP_PORT:String(port),LOCALMCP_TOKEN:localToken,LOCALMCP_INTERNAL:'1'},stdio:['ignore','ignore','inherit']});}
-function watchLocal(child:ChildProcess){child.on('error',error=>{console.error(error.message);stop(1);});child.on('exit',code=>{if(!closing&&child===local){console.error(`Local server exited (${code})`);stop(1);}});}
+function watchLocal(child:ChildProcess){child.on('error',error=>{console.error(error.message);stop(1);});child.on('exit',code=>{if(!closing&&!reloading&&child===local){console.error(`Local server exited (${code})`);stop(1);}});}
 local=spawnLocal();watchLocal(local);
-let closing=false, socket: WebSocket | undefined, reconnect: ReturnType<typeof setTimeout> | undefined;
 function stop(code=0) {
-  if (closing) return; closing=true; clearTimeout(reconnect); socket?.terminate(); local.kill('SIGTERM');
-  unlink(pidFile).catch(()=>{});
-  setTimeout(() => {local.kill('SIGKILL'); process.exit(code);},1500);
+  if (closing) return; closing=true; ready=false; clearTimeout(reconnect); socket?.terminate(); local?.kill('SIGTERM');
+  setTimeout(async () => {
+    local?.kill('SIGKILL');
+    await unlink(pidFile).catch(()=>{});
+    await closeControl();
+    process.exit(code);
+  },1500);
 }
-process.once('SIGINT',()=>stop()); process.once('SIGTERM',()=>stop());
-process.on('SIGHUP',()=>{console.error('Reloading LocalMCP configuration...');const previous=local;previous.once('exit',()=>{if(closing)return;local=spawnLocal();watchLocal(local);});previous.kill('SIGTERM');});
-let ready=false;
+async function reloadLocal() {
+  if (closing || !local) throw new Error('LocalMCP is not ready');
+  // Validate before interrupting the working server.
+  await config();
+  const previous = local;
+  await new Promise<void>(done => {
+    const timer = setTimeout(() => previous.kill('SIGKILL'), 5000);
+    previous.once('exit', () => {clearTimeout(timer);done();});
+    previous.kill('SIGTERM');
+  });
+  if (closing) throw new Error('LocalMCP is stopping');
+  local=spawnLocal();watchLocal(local);
+  const deadline=Date.now()+10000;
+  while(Date.now()<deadline&&!closing) {
+    if (local.exitCode !== null || local.signalCode !== null) break;
+    try {const r=await fetch(`http://127.0.0.1:${port}/mcp`,{headers:{Authorization:`Bearer ${localToken}`},signal:AbortSignal.timeout(500)});if(r.status===405){console.error('LocalMCP configuration reloaded.');return;}} catch {}
+    await new Promise(r=>setTimeout(r,100));
+  }
+  stop(1);
+  throw new Error('Reload failed; see ' + logFile);
+}
+let localReady=false;
 for (let i=0;i<100 && !closing;i++) {
-  try {const r=await fetch(`http://127.0.0.1:${port}/mcp`,{headers:{Authorization:`Bearer ${localToken}`},signal:AbortSignal.timeout(500)});if(r.status===405){ready=true;break;}} catch {}
+  try {const r=await fetch(`http://127.0.0.1:${port}/mcp`,{headers:{Authorization:`Bearer ${localToken}`},signal:AbortSignal.timeout(500)});if(r.status===405){localReady=true;break;}} catch {}
   await new Promise(r=>setTimeout(r,100));
 }
-if (!ready) {stop(1);} else {
+if (!localReady || closing) {stop(1);} else {
   let attempt=0, busy=false;
   const mcpPath=settings.deviceId?`/mcp/${settings.deviceId}/${settings.mcpToken}`:`/mcp/${settings.mcpToken}`;
-  const mcpUrl=new URL(mcpPath,origin).href;
+  mcpUrl=new URL(mcpPath,origin).href;
   await writeFile(resolve(stateDir,'connection.json'),JSON.stringify({url:mcpUrl,authentication:'none',transport:'worker-websocket',deviceId:settings.deviceId,root:process.env.LOCALMCP_ROOT||process.cwd()},null,2),{mode:0o600});
   const wsUrl=new URL(settings.deviceId?`/agent/${settings.deviceId}`:'/agent',origin);wsUrl.protocol=origin.protocol==='https:'?'wss:':'ws:';
   function connect() {
@@ -74,7 +107,7 @@ if (!ready) {stop(1);} else {
     const ws=new WebSocket(wsUrl,{headers:{Authorization:`Bearer ${settings.agentToken}`},handshakeTimeout:15000,maxPayload:160000});socket=ws;
     let assembly: Assembly | undefined, requestId: string | undefined, pong=Date.now();
     const heartbeat=setInterval(()=>{if(ws.readyState!==WebSocket.OPEN)return;if(Date.now()-pong>65000){ws.terminate();return;}ws.send('ping');},25000);
-    ws.on('open',()=>{attempt=0; console.log(`LocalMCP is running\n\nMCP URL:\n${mcpUrl}\n\nAuthentication: None\nConfig: ~/.localmcp/localmcp.json\n\nPress Ctrl+C to stop.`);});
+    ws.on('open',()=>{ready=true;attempt=0; console.log(`LocalMCP is running\n\nMCP URL:\n${mcpUrl}\n\nAuthentication: None\nConfig: ~/.localmcp/localmcp.json\n\nUse localmcp stop to stop.`);});
     const respond=(id:string,value:unknown)=>{if(ws.readyState===WebSocket.OPEN)for(const frame of frames(id,value))ws.send(frame);};
     ws.on('message', async raw=>{
       const message=raw.toString();if(message==='pong'){pong=Date.now();return;}
@@ -100,7 +133,7 @@ if (!ready) {stop(1);} else {
       } catch {ws.close(1008,'Invalid relay request');}
     });
     ws.on('error',error=>console.error(`Worker connection error: ${error.message}`));
-    ws.on('close',()=>{clearInterval(heartbeat);if(!closing){const delay=Math.min(30000,1000*2**Math.min(attempt++,5))+Math.random()*1000;console.error(`Worker disconnected; reconnecting in ${Math.ceil(delay/1000)}s. Requests are not replayed.`);reconnect=setTimeout(connect,delay);}});
+    ws.on('close',()=>{ready=false;clearInterval(heartbeat);if(!closing){const delay=Math.min(30000,1000*2**Math.min(attempt++,5))+Math.random()*1000;console.error(`Worker disconnected; reconnecting in ${Math.ceil(delay/1000)}s. Requests are not replayed.`);reconnect=setTimeout(connect,delay);}});
   }
   connect();
 }

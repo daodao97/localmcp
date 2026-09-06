@@ -72,14 +72,16 @@ LocalMCP 的用户级配置统一位于 `~/.localmcp/`：
 └── skills/
 ```
 
-之后可以在任意目录直接运行 `localmcp`；它等价于 `localmcp start`。工作区统一在 `~/.localmcp/localmcp.json` 中配置。无需为 LocalMCP 单独创建项目目录。
+之后可以在任意目录直接运行 `localmcp`；它等价于 `localmcp start`，会在后台启动，连接成功后输出公网 MCP URL 并返回终端。重复执行会复用已有进程。日志写入 `~/.localmcp/agent.log`；关闭终端不会停止服务。需要前台调试时可运行 `localmcp agent`。工作区统一在 `~/.localmcp/localmcp.json` 中配置。无需为 LocalMCP 单独创建项目目录。
 
 常用命令：
 
 ```sh
 localmcp          # 默认启动；首次运行自动创建配置
-localmcp start    # 显式启动（与 localmcp 等价）
-localmcp reload   # 重新加载配置并重启本地 MCP 服务
+localmcp start    # 幂等后台启动（与 localmcp 等价）
+localmcp status   # 显示 running/stopped、PID、MCP URL、Config、Log
+localmcp stop     # 停止后台服务；重复执行无副作用
+localmcp reload   # 校验并重新加载配置，保留后台 PID 和公网 URL
 localmcp stdio    # 标准 MCP stdio 模式
 localmcp http     # 本地 HTTP 模式
 ```
