@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {fork,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {createConnection} from 'node:net';
 import {controlEndpoint} from '../src/control-endpoint.js';
 const exec=promisify(execFile);
 
@@ -34,6 +35,14 @@ test('native IPC supports status, idempotent start, reload, stop and restart', {
       child.once('message',()=>done());child.once('error',reject);
       child.once('exit',code=>reject(new Error(`IPC server exited (${code}): ${errors}`)));
     });
+    // A request must complete without the client half-closing the pipe.
+    const response=await new Promise<string>((done,reject)=>{
+      const socket=createConnection(controlEndpoint(join(home,'.localmcp')).address);
+      let data='';socket.setTimeout(5000,()=>socket.destroy(new Error('IPC framing timeout')));
+      socket.on('connect',()=>socket.write('status\n'));
+      socket.on('data',chunk=>{data+=chunk;});socket.on('end',()=>{socket.destroy();done(data);});socket.on('error',reject);
+    });
+    assert.equal(JSON.parse(response).pid,child.pid);
     assert.match(await cli('status'),new RegExp(`PID: ${child.pid}`));
     assert.match(await cli('start'),new RegExp(`PID: ${child.pid}`));
     assert.match(await cli('reload'),/Config: reloads:1/);

@@ -18,7 +18,8 @@ export function request(command = 'status'): Promise<Status> {
     const socket = createConnection(endpoint.address);
     let data = '';
     const timer = setTimeout(() => socket.destroy(new Error('LocalMCP control request timed out')), 20000);
-    socket.on('connect', () => socket.end(command + '\n'));
+    // Windows pipes do not support the Unix half-close request pattern.
+    socket.on('connect', () => {if(process.platform==='win32')socket.write(command+'\n');else socket.end(command+'\n');});
     socket.on('data', chunk => {data += chunk; if (data.length > 65536) socket.destroy(new Error('Invalid control response'));});
     socket.on('error', reject);
     socket.on('close', () => clearTimeout(timer));
@@ -111,8 +112,10 @@ export async function serveControl(getStatus: () => Status, stop: () => void, re
     let data = '';
     socket.setTimeout(20000, () => socket.destroy());
     socket.on('error', () => {});
-    socket.on('data', chunk => {data += chunk; if (data.length > 100) socket.destroy();});
-    socket.on('end', () => {
+    let handled=false;
+    const handle=() => {
+      if(handled||socket.destroyed)return;
+      handled=true;
       void (async () => {
         const command = data.trim();
         if (command === 'reload') await reload();
@@ -120,7 +123,10 @@ export async function serveControl(getStatus: () => Status, stop: () => void, re
         if (command === 'stop') socket.once('close', stop);
         socket.end(JSON.stringify(getStatus()));
       })().catch(error => socket.end(JSON.stringify({error: error.message})));
-    });
+    };
+    socket.on('data', chunk => {data += chunk; if(data.length>100){socket.destroy();return;}if(data.includes('\n'))handle();});
+    // Retain EOF framing for older Unix clients.
+    socket.on('end',handle);
   });
   await new Promise<void>((ready, reject) => {server.once('error', reject); server.listen(endpoint.address, ready);});
   if(endpoint.socketFile)await chmod(endpoint.socketFile, 0o600);
